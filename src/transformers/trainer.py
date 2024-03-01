@@ -15,7 +15,7 @@
 """
 The Trainer class, to easily train a 🤗 Transformers from scratch or finetune it on a new task.
 """
-
+import time
 import contextlib
 import copy
 import functools
@@ -2906,13 +2906,13 @@ class Trainer:
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
+        print("backward begins, ", time.time())
         if self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
         else:
             self.accelerator.backward(loss)
-
+        print("backward ends, ", time.time())
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -2925,6 +2925,7 @@ class Trainer:
             labels = inputs.pop("labels")
         else:
             labels = None
+        print("forward begins, ", time.time())
         outputs = model(**inputs)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
@@ -2949,7 +2950,7 @@ class Trainer:
                 )
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-
+        print("forward ends, ", time.time())
         return (loss, outputs) if return_outputs else loss
 
     def is_local_process_zero(self) -> bool:
