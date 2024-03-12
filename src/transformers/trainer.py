@@ -2017,7 +2017,10 @@ class Trainer:
                             grad_norm = _grad_norm.item() if _grad_norm is not None else None
 
                     # Optimizer step
+                    print("weight update begins: ", time.time())
+                    
                     self.optimizer.step()
+                    print("weight update ends: ", time.time())
                     optimizer_was_run = not self.accelerator.optimizer_step_was_skipped
                     if optimizer_was_run:
                         # Delay optimizer scheduling until metrics are generated
@@ -2906,12 +2909,16 @@ class Trainer:
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         print("backward begins, ", time.time())
         if self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
         else:
             self.accelerator.backward(loss)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         print("backward ends, ", time.time())
         return loss.detach() / self.args.gradient_accumulation_steps
 
@@ -2925,6 +2932,8 @@ class Trainer:
             labels = inputs.pop("labels")
         else:
             labels = None
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         print("forward begins, ", time.time())
         outputs = model(**inputs)
         # Save past state if it exists
@@ -2950,6 +2959,9 @@ class Trainer:
                 )
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+            
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         print("forward ends, ", time.time())
         return (loss, outputs) if return_outputs else loss
 
