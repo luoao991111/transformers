@@ -355,6 +355,7 @@ class Trainer:
         callbacks: Optional[List[TrainerCallback]] = None,
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
+        no_backward: bool = False
     ):
         if args is None:
             output_dir = "tmp_trainer"
@@ -366,7 +367,7 @@ class Trainer:
         self.hp_name = None
         self.deepspeed = None
         self.is_in_train = False
-
+        self.no_backward = no_backward
         self.create_accelerator_and_postprocess()
 
         # memory metrics - must set up as early as possible
@@ -1959,9 +1960,12 @@ class Trainer:
 
                 if step % args.gradient_accumulation_steps == 0:
                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
-
-                with self.accelerator.accumulate(model):
-                    tr_loss_step = self.training_step(model, inputs)
+                if self.no_backward:
+                    with self.accelerator.accumulate(model):
+                        tr_loss_step = self.no_backward_training_step(model, inputs)
+                else:
+                    with self.accelerator.accumulate(model):
+                        tr_loss_step = self.training_step(model, inputs)
 
                 if (
                     args.logging_nan_inf_filter
@@ -2878,6 +2882,20 @@ class Trainer:
             ctx_manager = contextlib.nullcontext()
 
         return ctx_manager
+    def no_backward_training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        model.eval()
+        inputs = self._prepare_inputs(inputs)
+
+        if is_sagemaker_mp_enabled():
+            loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
+            return loss_mb.reduce_mean().detach().to(self.args.device)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+        return loss.detach() / self.args.gradient_accumulation_steps
 
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
