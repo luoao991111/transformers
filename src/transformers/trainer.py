@@ -2929,6 +2929,7 @@ class Trainer:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+        torch.cuda.cudart().cudaProfilerStart()
         print("backward begins, ", time.time())
         if self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
@@ -2938,6 +2939,7 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         print("backward ends, ", time.time())
+        torch.cuda.cudart().cudaProfilerStop()
         return loss.detach() / self.args.gradient_accumulation_steps
 
     def compute_loss(self, model, inputs, return_outputs=False):
